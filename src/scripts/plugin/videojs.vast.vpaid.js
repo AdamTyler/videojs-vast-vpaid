@@ -15,6 +15,8 @@ var utilities = require('../utils/utilityFunctions');
 var logger = require ('../utils/consoleLogger');
 
 module.exports = function VASTPlugin(options) {
+
+
   var snapshot;
   var player = this;
   var vast = new VASTClient();
@@ -58,9 +60,23 @@ module.exports = function VASTPlugin(options) {
     verbosity: 0
   };
 
+  var adsRemaining = 0;
+
   var settings = utilities.extend({}, defaultOpts, options || {});
 
-  if(utilities.isUndefined(settings.adTagUrl) && utilities.isDefined(settings.url)){
+  //
+  var totalMidrolls = utilities.isArray(settings.midrolls) ? settings.midrolls.length : 0;
+  adsRemaining += settings.midrolls.length;
+
+  // when we've played a midroll, push true
+  var midrollsPlayed = [];
+
+  // flag state for if an ad is playing or not.
+  // used to determine behaviour on events as some events
+  // will be 'duped' between ad and content
+  var adIsPlaying = false;
+
+  if (utilities.isUndefined(settings.adTagUrl) && utilities.isDefined(settings.url)){
     settings.adTagUrl = settings.url;
   }
 
@@ -80,7 +96,9 @@ module.exports = function VASTPlugin(options) {
 
   vastUtil.runFlashSupportCheck(settings.vpaidFlashLoaderPath);// Necessary step for VPAIDFLASHClient to work.
 
-  playerUtils.prepareForAds(player);
+  if (settings.preroll) {
+    playerUtils.prepareForAds(player);
+  }
 
   if (settings.playAdAlways) {
     // No matter what happens we play a new ad before the user sees the video again.
@@ -91,7 +109,125 @@ module.exports = function VASTPlugin(options) {
     });
   }
 
-  player.on('vast.firstPlay', tryToPlayPrerollAd);
+  if (settings.preroll && utilities.isBool(settings.preroll)) {
+
+    adsRemaining++;
+
+    player.on('vast.firstPlay', function () {
+      tryToPlayRollAd('pre');
+      adsRemaining--;
+    });
+  } else {
+    // only listen for this once, then remove the handler
+    player.one('playing', function () {
+      player.trigger('vast.contentStart');
+    });
+  }
+
+
+  // trigger a vast.contentEnd event only if we're not
+  // playing an ad and we've reached the end of the content
+  // postroll currently depends on this.
+  player.on('ended', function () {
+    if (!adIsPlaying) {
+      if (player.currentTime() > player.duration() - 1) {
+        player.trigger('vast.contentEnd');
+      }
+    }
+  });
+
+  if (settings.postroll && utilities.isBool(settings.postroll)) {
+
+    adsRemaining++;
+
+    player.one('vast.contentEnd', function () {
+      if (player.currentTime() > player.duration() - 1) {
+        tryToPlayRollAd('post');
+        adsRemaining--;
+      }
+    });
+  }
+
+  function validateMidrolls(midrolls) {
+
+    // it should be an array
+    if (!utilities.isArray(midrolls)) {
+      return false;
+    }
+
+    // the array should use numbers as values
+    for (var i=0,l=midrolls.length; i<l; i++) {
+      if (!utilities.isNumber(midrolls[i])) {
+        return false;
+      }
+
+      if (midrolls[i] >= player.duration()) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  function timeupdateWatcher() {
+    if (adIsPlaying) {
+      // this isn't always taken off, so this watcher
+      // keeps trucking along even though it shouldn't
+      player.off('timeupdate', timeupdateWatcher);
+    }
+
+    var currentMidrollIndex;
+
+    if (midrollsPlayed.length < totalMidrolls) {
+      currentMidrollIndex = midrollsPlayed.length;
+    } else {
+      player.off('timeupdate', timeupdateWatcher);
+      return;
+    }
+
+    var lookAhead = 0.5;
+
+    if (player.currentTime() > settings.midrolls[currentMidrollIndex] &&
+        !player.paused() &&
+        !adIsPlaying) {
+      player.off('timeupdate', timeupdateWatcher);
+      tryToPlayRollAd('mid');
+      midrollsPlayed.push(true);
+
+
+    } else if (player.currentTime() < settings.midrolls[currentMidrollIndex] &&
+        player.currentTime() > settings.midrolls[currentMidrollIndex]-lookAhead &&
+        !player.paused() &&
+        !adIsPlaying) {
+      player.off('timeupdate', timeupdateWatcher);
+      tryToPlayRollAd('mid');
+      midrollsPlayed.push(true);
+    }
+  }
+
+  player.on('vast.adStart', function () {
+    adIsPlaying = true;
+  });
+
+  player.on('vast.adEnd', function () {
+    adIsPlaying = false;
+  });
+
+  player.on('playing', function () {
+    if (!adIsPlaying) {
+      if (validateMidrolls(settings.midrolls)) {
+        player.on('timeupdate', timeupdateWatcher);
+      }
+    }
+  });
+
+  player.on('paused', function () {
+    if (!adIsPlaying) {
+      if (validateMidrolls()) {
+        player.off('timeupdate', timeupdateWatcher);
+      }
+    }
+  });
 
   player.on('vast.reset', function () {
     //If we are reseting the plugin, we don't want to restore the content
@@ -119,8 +255,13 @@ module.exports = function VASTPlugin(options) {
 
   return player.vast;
 
-  /**** Local functions ****/
-  function tryToPlayPrerollAd() {
+  function tryToPlayRollAd(rollType) {
+    console.log('tryToPlayRollAd ', rollType);
+    // stop listening for timeupdate, we only do that for content
+    player.off('timeupdate', timeupdateWatcher);
+    // set flag
+    adIsPlaying = true;
+
     //We remove the poster to prevent flickering whenever the content starts playing
     playerUtils.removeNativePoster(player);
 
@@ -136,8 +277,10 @@ module.exports = function VASTPlugin(options) {
       playPrerollAd
     ], function (error, response) {
       if (error) {
+        adsRemaining--;
         trackAdError(error, response);
       } else {
+        adsRemaining--;
         player.trigger('vast.adEnd');
       }
     });
@@ -152,6 +295,7 @@ module.exports = function VASTPlugin(options) {
 
     function restoreVideoContent() {
       setupContentEvents();
+
       if (snapshot) {
         playerUtils.restorePlayerSnapshot(player, snapshot);
         snapshot = null;
@@ -185,6 +329,7 @@ module.exports = function VASTPlugin(options) {
       if (canPlayPrerollAd()) {
         snapshot = playerUtils.getPlayerSnapshot(player);
         player.pause();
+
         addSpinnerIcon();
 
         if(player.paused()) {
@@ -341,7 +486,9 @@ module.exports = function VASTPlugin(options) {
 
   function trackAdError(error, vastResponse) {
     player.trigger({type: 'vast.adError', error: error});
-    cancelAds();
+    if (adsRemaining === 0) {
+      cancelAds();
+    }
     logger.error ('AD ERROR:', error.message, error, vastResponse);
   }
 
