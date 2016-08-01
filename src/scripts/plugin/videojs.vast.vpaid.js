@@ -244,6 +244,7 @@ module.exports = function VASTPlugin(options) {
     //If we are reseting the plugin, we don't want to restore the content
     snapshot = null;
     cancelAds();
+    adsRemaining = 0;
   });
 
   player.vast = {
@@ -275,7 +276,7 @@ module.exports = function VASTPlugin(options) {
     //We remove the poster to prevent flickering whenever the content starts playing
     playerUtils.removeNativePoster(player);
 
-    playerUtils.once(player, ['vast.adsCancel', 'vast.adEnd'], function () {
+    playerUtils.once(player, ['vast.adsCancel', 'vast.adEnd', 'vast.adSkip'], function () {
       removeAdUnit();
       restoreVideoContent();
     });
@@ -367,7 +368,7 @@ module.exports = function VASTPlugin(options) {
         trackAdError(new VASTError('timeout while waiting for the video to start playing', 402));
       }, settings.adCancelTimeout);
 
-      playerUtils.once(player, ['vast.adStart', 'vast.adsCancel'], clearAdCancelTimeout);
+      playerUtils.once(player, ['vast.adStart', 'vast.adsCancel', 'vast.adSkip'], clearAdCancelTimeout);
 
       /*** local functions ***/
       function clearAdCancelTimeout() {
@@ -382,7 +383,7 @@ module.exports = function VASTPlugin(options) {
 
     function addSpinnerIcon() {
       dom.addClass(player.el(), 'vjs-vast-ad-loading');
-      playerUtils.once(player, ['vast.adStart', 'vast.adsCancel'], removeSpinnerIcon);
+      playerUtils.once(player, ['vast.adStart', 'vast.adsCancel', 'vast.adSkip'], removeSpinnerIcon);
     }
 
     function removeSpinnerIcon() {
@@ -400,7 +401,12 @@ module.exports = function VASTPlugin(options) {
     adsCanceled = true;
   }
 
-  function playPrerollAd(callback) {
+  function skipAd() {
+    console.log('skipAd ................. called');
+    player.trigger('vast.adSkip');
+  }
+
+  function playRollAd(callback) {
     async.waterfall([
       getVastResponse,
       playAd
@@ -421,13 +427,13 @@ module.exports = function VASTPlugin(options) {
     var adIntegrator = isVPAID(vastResponse) ? new VPAIDIntegrator(player, settings) : new VASTIntegrator(player);
     var adFinished = false;
 
-    playerUtils.once(player, ['vast.adStart', 'vast.adsCancel'], function (evt) {
+    playerUtils.once(player, ['vast.adStart', 'vast.adsCancel', 'vast.adSkip'], function (evt) {
       if (evt.type === 'vast.adStart') {
         addAdsLabel();
       }
     });
 
-    playerUtils.once(player, ['vast.adEnd', 'vast.adsCancel'], removeAdsLabel);
+    playerUtils.once(player, ['vast.adEnd', 'vast.adsCancel', 'vast.adSkip'], removeAdsLabel);
 
     if (utilities.isIDevice()) {
       preventManualProgress();
@@ -460,7 +466,7 @@ module.exports = function VASTPlugin(options) {
       player.on('timeupdate', preventAdSeek);
       player.on('ended', preventAdSkip);
 
-      playerUtils.once(player, ['vast.adEnd', 'vast.adsCancel', 'vast.adError'], stopPreventManualProgress);
+      playerUtils.once(player, ['vast.adEnd', 'vast.adsCancel', 'vast.adError', 'vast.adSkip'], stopPreventManualProgress);
 
       /*** Local functions ***/
       function preventAdSkip() {
@@ -497,10 +503,11 @@ module.exports = function VASTPlugin(options) {
   function trackAdError(error, vastResponse) {
     player.trigger({type: 'vast.adError', error: error});
 
-    //this if conditional trips the test
-    //if (adsRemaining === 0) {
+    if (adsRemaining === 0 || !settings.adsEnabled) {
       cancelAds();
-    //}
+    } else {
+      skipAd();
+    }
 
     logger.error ('AD ERROR:', error.message, error, vastResponse);
   }
