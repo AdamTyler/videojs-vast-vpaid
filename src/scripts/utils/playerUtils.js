@@ -118,6 +118,10 @@ playerUtils.restorePlayerSnapshot = function restorePlayerSnapshot(player, snaps
    * restoration is required
    */
   function hasSrcChanged(player, snapshot) {
+    // if our source is a blob then are streaming so return false
+    if(player.src().indexOf('blob') !== -1) {
+      return false;
+    }
     if (player.src()) {
       return player.src() !== snapshot.src;
     }
