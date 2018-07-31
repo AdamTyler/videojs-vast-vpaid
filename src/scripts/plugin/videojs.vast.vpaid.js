@@ -110,6 +110,10 @@ module.exports = function VASTPlugin(options) {
 
     disable: function () {
       settings.adsEnabled = false;
+    },
+
+    newAdUrl: function (url) {
+      settings.adTagUrl = utilities.echoFn(url);
     }
   };
 

@@ -10,7 +10,6 @@ var gulp        = require('gulp');
 var gulpif      = require('gulp-if');
 var jshint      = require('gulp-jshint');
 var lazypipe    = require('lazypipe');
-var mergeStream = require('merge-stream');
 var path        = require('path');
 var rename      = require('gulp-rename');
 var runSequence = require('run-sequence');
@@ -88,33 +87,26 @@ function buildProdJs() {
 
 
 gulp.task('build-scripts', function() {
+  var fileName  = 'videojs.vast.vpaid.js';
+  var entryFile = path.join('src/scripts', fileName);
+  var destPath  = path.join(devPath, 'scripts');
 
-  var buildProcesses = config.versions.map(function(version) {
-
-    var fileName  = 'videojs_' + version + '.vast.vpaid.js';
-    var entryFile = path.join('src/scripts', fileName);
-    var destPath  = path.join(devPath, 'scripts');
-
-    return browserify({
-        entries: entryFile,
-        debug: true,
-        paths: 'bower_components',
-        cache: {},
-        packageCache: {}
-      })
-      .transform(babelify, {
-        presets: ['es2015'],
-        sourceMaps: true,
-        only: /VPAIDFLASHClient/
-      })
-      .bundle()
-      .pipe(source(fileName))
-      .pipe(gulp.dest(destPath))
-      .pipe(gulpif(isProduction, buildProdJs()));
-
-  });
-
-  return mergeStream.apply(this, buildProcesses)
+  return browserify({
+      entries: entryFile,
+      debug: true,
+      paths: 'bower_components',
+      cache: {},
+      packageCache: {}
+    })
+    .transform(babelify, {
+      presets: ['es2015'],
+      sourceMaps: true,
+      only: /VPAIDFLASHClient/
+    })
+    .bundle()
+    .pipe(source(fileName))
+    .pipe(gulp.dest(destPath))
+    .pipe(gulpif(isProduction, buildProdJs()))
     .pipe(size({showFiles: true, title: '[Scripts]'}));
 });
 
