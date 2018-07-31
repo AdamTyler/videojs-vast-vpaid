@@ -99,7 +99,7 @@ playerUtils.restorePlayerSnapshot = function restorePlayerSnapshot(player, snaps
 
   /**
    * Sometimes firefox does not trigger the 'canplay' evt.
-   * This code ensure that it always gets triggered triggered.
+   * This code ensures that it always gets triggered.
    */
   function ensureCanplayEvtGetsFired() {
     var timeoutId = setTimeout(function() {
@@ -118,6 +118,10 @@ playerUtils.restorePlayerSnapshot = function restorePlayerSnapshot(player, snaps
    * restoration is required
    */
   function hasSrcChanged(player, snapshot) {
+    // if our source is a blob then are streaming so return false
+    if(player.src().indexOf('blob') !== -1) {
+      return false;
+    }
     if (player.src()) {
       return player.src() !== snapshot.src;
     }
