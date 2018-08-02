@@ -19,6 +19,7 @@ module.exports = function VASTPlugin(options) {
   var player = this;
   var vast = new VASTClient();
   var adsCanceled = false;
+
   var defaultOpts = {
     // maximum amount of time in ms to wait to receive `adsready` from the ad
     // implementation after play has been requested. Ad implementations are
@@ -55,7 +56,11 @@ module.exports = function VASTPlugin(options) {
     // 2 - error, warn, info
     // 3 - error, warn, info, log
     // 4 - error, warn, info, log, debug
-    verbosity: 0
+    verbosity: 0,
+
+    preroll: true,
+    postroll: false,
+    midrolls: []
   };
 
   var settings = utilities.extend({}, defaultOpts, options || {});
@@ -91,7 +96,7 @@ module.exports = function VASTPlugin(options) {
     return trackAdError(new VASTError('on VideoJS VAST plugin, missing adTagUrl on options object'));
   }
 
-  logger.setVerbosity (settings.verbosity);
+  logger.setVerbosity(settings.verbosity);
 
   vastUtil.runFlashSupportCheck(settings.vpaidFlashLoaderPath);// Necessary step for VPAIDFLASHClient to work.
 
@@ -285,7 +290,7 @@ module.exports = function VASTPlugin(options) {
       checkAdsEnabled,
       preparePlayerForAd,
       startAdCancelTimeout,
-      playPrerollAd
+      playRollAd
     ], function (error, response) {
       if (error) {
         adsRemaining--;
@@ -322,7 +327,7 @@ module.exports = function VASTPlugin(options) {
         player.trigger('vast.contentStart');
 
         playerUtils.once(player, ['ended', 'vast.reset', 'vast.firstPlay'], function (evt) {
-          if (evt.type === 'ended') {
+          if (evt.type === 'ended' && !adIsPlaying) {
             player.trigger('vast.contentEnd');
           }
         });
@@ -393,7 +398,6 @@ module.exports = function VASTPlugin(options) {
         dom.removeClass(player.el(), 'vjs-vast-ad-loading');
       }, 100);
     }
-
   }
 
   function cancelAds() {
@@ -420,6 +424,7 @@ module.exports = function VASTPlugin(options) {
   function playAd(vastResponse, callback) {
     //TODO: Find a better way to stop the play. The 'playPrerollWaterfall' ends in an inconsistent situation
     //If the state is not 'preroll?' it means the ads were canceled therefore, we break the waterfall
+
     if (adsCanceled) {
       return;
     }
